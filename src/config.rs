@@ -6,12 +6,12 @@ pub use s2n::s2n_status_request_type as StatusRequestType;
 pub use s2n::s2n_tls_extension_type as TLSExtensionType;
 pub use s2n::s2n_cert_auth_type as CertAuthType;
 
-pub struct S2NConfig {
+pub struct Config {
     s2n_config: *mut s2n_config,
 }
 
 #[derive(Debug, Fail)]
-pub enum S2NConfigError {
+pub enum ConfigError {
     #[fail(display = "FFI Error: {}", _0)]
     FFIError(#[cause]
              ffi::NulError),
@@ -30,18 +30,18 @@ pub enum S2NConfigError {
     #[fail(display = "Error setting Certificate Authentication type")]
     CertAuthTypeError,
 }
-use self::S2NConfigError::*;
+use self::ConfigError::*;
 
-type S2NConfigResult = Result<(), S2NConfigError>;
+type ConfigResult = Result<(), ConfigError>;
 
-impl S2NConfig {
+impl Config {
     pub fn new() -> Self {
         super::init();
         let s2n_config = unsafe { s2n_config_new() };
         Self { s2n_config }
     }
 
-    pub fn set_cipher_preferences(&mut self, version: &str) -> S2NConfigResult {
+    pub fn set_cipher_preferences(&mut self, version: &str) -> ConfigResult {
         // These must be on seperate lines to ensure the lifetime of version is longer than the FFI call
         let version_c = CString::new(version).map_err(FFIError)?;
         let version_ptr = version_c.as_ptr();
@@ -57,7 +57,7 @@ impl S2NConfig {
     pub fn add_cert_chain_and_key(&mut self,
                                   cert_chain_pem: &str,
                                   private_key_pem: &str)
-                                  -> S2NConfigResult {
+                                  -> ConfigResult {
         // These must be on seperate lines to ensure the lifetime of version is longer than the FFI call
         let cert_chain_pem_c = CString::new(cert_chain_pem).map_err(FFIError)?;
         let cert_chain_pem_ptr = cert_chain_pem_c.as_ptr();
@@ -76,7 +76,7 @@ impl S2NConfig {
         }
     }
 
-    pub fn add_dhparams(&mut self, dhparams_pem: &str) -> S2NConfigResult {
+    pub fn add_dhparams(&mut self, dhparams_pem: &str) -> ConfigResult {
         // These must be on seperate lines to ensure the lifetime of version is longer than the FFI call
         let dhparams_pem_c = CString::new(dhparams_pem).map_err(FFIError)?;
         let dhparams_pem_ptr = dhparams_pem_c.as_ptr();
@@ -90,13 +90,13 @@ impl S2NConfig {
     }
 
     #[allow(dead_code, unused_variables, unreachable_code)]
-    pub fn set_protocol_preferences(&mut self, protocols: Vec<&str>) -> S2NConfigResult {
+    pub fn set_protocol_preferences(&mut self, protocols: Vec<&str>) -> ConfigResult {
         unimplemented!();
         // Segfault
         let mut protocols_vec_c = protocols
             .iter()
             .map(|s| CString::new(*s).map_err(FFIError))
-            .collect::<Result<Vec<CString>, S2NConfigError>>()?;
+            .collect::<Result<Vec<CString>, ConfigError>>()?;
         protocols_vec_c.shrink_to_fit();
         assert!(protocols_vec_c.len() == protocols_vec_c.capacity());
 
@@ -117,7 +117,7 @@ impl S2NConfig {
         }
     }
 
-    pub fn set_status_request_type(&mut self, request_type: StatusRequestType) -> S2NConfigResult {
+    pub fn set_status_request_type(&mut self, request_type: StatusRequestType) -> ConfigResult {
         let ret = unsafe { s2n_config_set_status_request_type(self.s2n_config, request_type) };
 
         match ret {
@@ -131,7 +131,7 @@ impl S2NConfig {
     pub fn set_extension_data(&mut self,
                               extension_type: TLSExtensionType,
                               data: Vec<u8>)
-                              -> S2NConfigResult {
+                              -> ConfigResult {
         unimplemented!();
         // Segfault
         let data_ptr = data.as_ptr();
@@ -151,7 +151,7 @@ impl S2NConfig {
     // pub fn set_nanoseconds_since_epoch_callback<'d, F, D>(&self,
     //                                                                  callback: Option<&'d F>,
     //                                                                  data: &'d D)
-    //                                                                  -> S2NConfigResult {
+    //                                                                  -> ConfigResult {
     //     unsafe extern "C" fn c_callback(data_ptr: *mut ::std::os::raw::c_void,
     //                                     seconds: *mut u64)
     //                                     -> ::std::os::raw::c_int {
@@ -175,7 +175,7 @@ impl S2NConfig {
     //     }
     // }
 
-    // pub fn set_client_hello_cb<F, D>(&mut self, callback: Option<F>, ctx: D) -> S2NConfigResult {
+    // pub fn set_client_hello_cb<F, D>(&mut self, callback: Option<F>, ctx: D) -> ConfigResult {
     //     let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
     //     let ret = unsafe { s2n_config_set_client_hello_cb(self.s2n_config, callback, ctx_ptr) };
 
@@ -186,7 +186,7 @@ impl S2NConfig {
     //     }
     // }
 
-    pub fn set_client_auth_type(&mut self, cert_auth_type: CertAuthType) -> S2NConfigResult {
+    pub fn set_client_auth_type(&mut self, cert_auth_type: CertAuthType) -> ConfigResult {
         let ret = unsafe { s2n_config_set_client_auth_type(self.s2n_config, cert_auth_type) };
         match ret {
             0 => Ok(()),
@@ -196,7 +196,7 @@ impl S2NConfig {
     }
 }
 
-impl Drop for S2NConfig {
+impl Drop for Config {
     fn drop(&mut self) {
         unsafe { s2n_config_free(self.s2n_config) };
     }
@@ -210,31 +210,31 @@ mod tests {
 
     #[test]
     fn create_drop_config() {
-        let config = S2NConfig::new();
+        let config = Config::new();
         drop(config);
     }
 
     #[test]
     fn test_config_set_cipher() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config.set_cipher_preferences("default").unwrap();
     }
 
     #[test]
     fn test_config_set_cipher_version() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config.set_cipher_preferences("20160411").unwrap();
     }
 
     #[test]
     fn test_config_set_bad_cipher() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config.set_cipher_preferences("NOTACIPHER").unwrap_err();
     }
 
     #[test]
     fn test_config_set_cert_and_key() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
 
         let cert = include_str!("../test/apiserver.pem");
         let key = include_str!("../test/apiserver-key.pem");
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_config_set_bad_cert() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config
             .add_cert_chain_and_key("NOTACERT", "NOTAKEY")
             .unwrap_err();
@@ -252,20 +252,20 @@ mod tests {
 
     // #[test]
     fn test_config_set_dh_param() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         let params = include_str!("../test/dhparam.pem");
         config.add_dhparams(params).unwrap();
     }
 
     #[test]
     fn test_config_set_bad_dh_param() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config.add_dhparams("NOTPARAMS").unwrap_err();
     }
 
     // #[test]
     fn test_config_set_protocol_preferences() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config
             .set_protocol_preferences(vec!["http/1.1", "spdy/3.1"])
             .unwrap();
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_config_set_status_request_type() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config
             .set_status_request_type(StatusRequestType::S2N_STATUS_REQUEST_OCSP)
             .unwrap();
@@ -281,7 +281,7 @@ mod tests {
 
     // #[test]
     fn test_config_set_extension_data() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config
             .set_extension_data(TLSExtensionType::S2N_EXTENSION_CERTIFICATE_TRANSPARENCY,
                                 vec![1, 2, 3])
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_config_set_cert_auth_type() {
-        let mut config = S2NConfig::new();
+        let mut config = Config::new();
         config
             .set_client_auth_type(CertAuthType::S2N_CERT_AUTH_REQUIRED)
             .unwrap();
