@@ -7,7 +7,7 @@ pub use s2n::s2n_tls_extension_type as TLSExtensionType;
 pub use s2n::s2n_cert_auth_type as CertAuthType;
 
 pub struct Config {
-    s2n_config: *mut s2n_config,
+    pub(crate) s2n_config: *mut s2n_config,
 }
 
 #[derive(Debug, Fail)]
@@ -95,25 +95,28 @@ impl Config {
         }
     }
 
-    #[allow(dead_code, unused_variables, unreachable_code)]
-    pub fn set_protocol_preferences(&mut self, protocols: Vec<&str>) -> ConfigResult {
-        unimplemented!();
-        // Segfault
-        let mut protocols_vec_c = protocols
-            .iter()
-            .map(|s| CString::new(*s).map_err(FFIError))
-            .collect::<Result<Vec<CString>, ConfigError>>()?;
-        protocols_vec_c.shrink_to_fit();
-        assert!(protocols_vec_c.len() == protocols_vec_c.capacity());
+    pub fn set_protocol_preferences(&mut self, protocols: &[&str]) -> ConfigResult {
+        // This vec will hold the pointers to the strings
+        let mut protocols_ptrs = vec![];
+        // This Vec exists to hold the CStrings lifetimes open past the iteration and through the c
+        // function call
+        let mut cstring_lifetime = vec![];
 
-        let protocols_ptr = protocols_vec_c.as_ptr();
+        for &s in protocols {
+            let cstring = CString::new(s).unwrap();
+            let cstring_ptr = cstring.as_ptr();
+            cstring_lifetime.push(cstring); // Ensure cstring's lifetime lasts long enough
 
+            protocols_ptrs.push(cstring_ptr as *const _ as *const ::std::os::raw::c_void);
+        }
+
+        let protocols_ptrs_ptr = protocols_ptrs.as_ptr() as *const *const ::std::os::raw::c_char;
+        let protocols_ptrs_len = protocols_ptrs.len() as ::std::os::raw::c_int;
 
         let ret = unsafe {
             s2n_config_set_protocol_preferences(self.s2n_config,
-                                                protocols_ptr as
-                                                *const *const ::std::os::raw::c_char,
-                                                protocols_vec_c.len() as i32)
+                                                protocols_ptrs_ptr,
+                                                protocols_ptrs_len)
         };
 
         match ret {
