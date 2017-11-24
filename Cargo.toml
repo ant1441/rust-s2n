@@ -1,0 +1,11 @@
+[package]
+authors = ["Adam <adam@hodgen.uk>"]
+name = "s2n-bindgen"
+version = "0.1.0"
+
+[build-dependencies]
+bindgen = "0.26.3"
+
+[dependencies]
+failure = "0.1.0"
+failure_derive = "0.1.0"
