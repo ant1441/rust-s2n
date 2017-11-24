@@ -5,8 +5,9 @@ extern crate failure;
 
 use std::sync::{Once, ONCE_INIT};
 
-mod config;
 mod s2n;
+mod config;
+mod connection;
 
 static START: Once = ONCE_INIT;
 
