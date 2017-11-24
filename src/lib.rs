@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![cfg_attr(feature="clippy", feature(plugin))]
+#![cfg_attr(feature="clippy", plugin(clippy))]
 
 extern crate failure;
 #[macro_use] extern crate failure_derive;
@@ -8,6 +10,9 @@ use std::sync::{Once, ONCE_INIT};
 mod s2n;
 mod config;
 mod connection;
+
+pub use connection::{Connection, Mode};
+pub use config::{Config, StatusRequestType, TLSExtensionType, CertAuthType};
 
 static START: Once = ONCE_INIT;
 

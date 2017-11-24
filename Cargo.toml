@@ -7,5 +7,6 @@ version = "0.1.0"
 bindgen = "0.26.3"
 
 [dependencies]
+clippy = {version = "*", optional = true}
 failure = "0.1.0"
 failure_derive = "0.1.0"

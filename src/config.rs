@@ -34,15 +34,21 @@ use self::ConfigError::*;
 
 type ConfigResult = Result<(), ConfigError>;
 
-impl Config {
-    pub fn new() -> Self {
+impl Default for Config {
+    fn default() -> Self {
         super::init();
         let s2n_config = unsafe { s2n_config_new() };
         Self { s2n_config }
     }
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Default::default()
+    }
 
     pub fn set_cipher_preferences(&mut self, version: &str) -> ConfigResult {
-        // These must be on seperate lines to ensure the lifetime of version is longer than the FFI call
+        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
         let version_c = CString::new(version).map_err(FFIError)?;
         let version_ptr = version_c.as_ptr();
 
@@ -58,7 +64,7 @@ impl Config {
                                   cert_chain_pem: &str,
                                   private_key_pem: &str)
                                   -> ConfigResult {
-        // These must be on seperate lines to ensure the lifetime of version is longer than the FFI call
+        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
         let cert_chain_pem_c = CString::new(cert_chain_pem).map_err(FFIError)?;
         let cert_chain_pem_ptr = cert_chain_pem_c.as_ptr();
         let private_key_pem_c = CString::new(private_key_pem).map_err(FFIError)?;
@@ -77,7 +83,7 @@ impl Config {
     }
 
     pub fn add_dhparams(&mut self, dhparams_pem: &str) -> ConfigResult {
-        // These must be on seperate lines to ensure the lifetime of version is longer than the FFI call
+        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
         let dhparams_pem_c = CString::new(dhparams_pem).map_err(FFIError)?;
         let dhparams_pem_ptr = dhparams_pem_c.as_ptr();
         let ret = unsafe { s2n_config_add_dhparams(self.s2n_config, dhparams_pem_ptr) };
@@ -130,7 +136,7 @@ impl Config {
     #[allow(dead_code, unused_variables, unreachable_code)]
     pub fn set_extension_data(&mut self,
                               extension_type: TLSExtensionType,
-                              data: Vec<u8>)
+                              data: &[u8])
                               -> ConfigResult {
         unimplemented!();
         // Segfault
@@ -263,12 +269,11 @@ mod tests {
         config.add_dhparams("NOTPARAMS").unwrap_err();
     }
 
-    // #[test]
+    #[test]
     fn test_config_set_protocol_preferences() {
         let mut config = Config::new();
-        config
-            .set_protocol_preferences(vec!["http/1.1", "spdy/3.1"])
-            .unwrap();
+        let protocols = vec!["http/1.1", "spdy/3.1"];
+        config.set_protocol_preferences(&protocols).unwrap();
     }
 
     #[test]
@@ -282,9 +287,11 @@ mod tests {
     // #[test]
     fn test_config_set_extension_data() {
         let mut config = Config::new();
+
+        let data = vec![1, 2, 3];
         config
             .set_extension_data(TLSExtensionType::S2N_EXTENSION_CERTIFICATE_TRANSPARENCY,
-                                vec![1, 2, 3])
+                                &data)
             .unwrap();
     }
 
