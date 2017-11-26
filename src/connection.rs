@@ -1,14 +1,18 @@
 use std::ffi::{self, CStr, CString};
 use std::fmt;
-use std::net::TcpStream;
-use std::string::ToString;
 use std::io::{self, Read, Write};
+use std::net::TcpStream;
+use std::os::unix::io::RawFd;
+use std::slice;
+use std::string::ToString;
 
 use failure::Fail;
 
 use config::Config;
 use s2n::*;
 pub use s2n::s2n_mode as Mode;
+pub use s2n::s2n_blinding as Blinding;
+use types::CertAuthType;
 
 pub struct Connection {
     s2n_connection: *mut s2n_connection,
@@ -38,10 +42,20 @@ pub enum ConnectionError {
     ConnectionNegotiateError,
     #[fail(display = "Error getting protocol version")]
     ProtocolVersionError,
+    #[fail(display = "Error setting Certificate Authentication type")]
+    CertAuthTypeError,
     #[fail(display = "Error reading")]
     ReadError,
     #[fail(display = "Error sending")]
     SendError,
+    #[fail(display = "Shutdown Error")]
+    ShutdownError,
+    #[fail(display = "Error setting Blinding")]
+    ConnectionSetBlindingError,
+    #[fail(display = "Error setting Latency or Throughput")]
+    SetLatencyThroughputError,
+    #[fail(display = "Error setting CorkedIO")]
+    SetCorkedIOError,
 }
 use self::ConnectionError::*;
 
@@ -57,6 +71,9 @@ impl Connection {
     pub fn new(mode: Mode) -> Self {
         super::init();
         let s2n_connection = unsafe { s2n_connection_new(mode) };
+        if s2n_connection.is_null() {
+            panic!("Unable to make connection")
+        }
         Self { s2n_connection }
     }
 
@@ -76,13 +93,156 @@ impl Connection {
         self.set_fd(fd)
     }
 
-    pub fn set_fd(&mut self, readfd: ::std::os::unix::io::RawFd) -> ConnectionResult {
+    // TODO: Type parameter on Struct to protect get_context?
+    pub fn set_context<T>(&mut self, mut ctx: T) -> ConnectionResult {
+        let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe { s2n_connection_set_ctx(self.s2n_connection, ctx_ptr) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ConnectionSetContextError),
+            _ => unreachable!(),
+        }
+    }
+
+    // TODO: Type parameter on Struct to protect from set_context?
+    pub fn get_context<T>(&self) -> Option<&mut T> {
+        let ctx_ptr = unsafe { s2n_connection_get_ctx(self.s2n_connection) };
+        if ctx_ptr.is_null() {
+            None
+        } else {
+            let ctx: &mut T = unsafe { &mut *(ctx_ptr as *mut T) };
+            Some(ctx)
+        }
+    }
+
+    pub fn set_fd(&mut self, readfd: RawFd) -> ConnectionResult {
         let ret = unsafe { s2n_connection_set_fd(self.s2n_connection, readfd) };
         match ret {
             0 => Ok(()),
             -1 => Err(ConnectionSetFDError),
             _ => unreachable!(),
         }
+    }
+
+    pub fn set_read_fd(&mut self, readfd: RawFd) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_set_read_fd(self.s2n_connection, readfd) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ConnectionSetFDError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_write_fd(&mut self, readfd: RawFd) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_set_write_fd(self.s2n_connection, readfd) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ConnectionSetFDError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn use_corked_io(&mut self) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_use_corked_io(self.s2n_connection) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(SetCorkedIOError),
+            _ => unreachable!(),
+        }
+    }
+
+    // TODO s2n_connection_set_recv_ctx
+    // TODO s2n_connection_set_send_ctx
+
+    // TODO s2n_connection_set_recv_cb
+    // TODO s2n_connection_set_send_cb
+
+    pub fn prefer_throughput(&mut self) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_prefer_throughput(self.s2n_connection) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(SetLatencyThroughputError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn prefer_low_latency(&mut self) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_prefer_low_latency(self.s2n_connection) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(SetLatencyThroughputError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_blinding(&mut self, blinding: Blinding) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_set_blinding(self.s2n_connection, blinding) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ConnectionSetBlindingError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn get_delay(&mut self) -> u64 {
+        // TODO: Should be &mut self? It calls nanoseconds_since_epoch
+        unsafe { s2n_connection_get_delay(self.s2n_connection) }
+    }
+
+    pub fn set_server_name(&mut self, server_name: &str) -> ConnectionResult {
+        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
+        let server_name_c = CString::new(server_name).map_err(FFIError)?;
+        let server_name_ptr = server_name_c.as_ptr();
+
+        let ret = unsafe { s2n_set_server_name(self.s2n_connection, server_name_ptr) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ConnectionServerNameError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn get_server_name(&self) -> Option<String> {
+        let ret = unsafe { s2n_get_server_name(self.s2n_connection) };
+        if ret.is_null() {
+            return None;
+        }
+        unsafe { CStr::from_ptr(ret) }
+            .to_str()
+            .ok()
+            .map(|s| s.to_string())
+    }
+
+    pub fn get_application_protocol(&self) -> Option<String> {
+        let ret = unsafe { s2n_get_application_protocol(self.s2n_connection) };
+        if ret.is_null() {
+            return None;
+        }
+        unsafe { CStr::from_ptr(ret) }
+            .to_str()
+            .ok()
+            .map(|s| s.to_string())
+    }
+
+    pub fn get_ocp_response(&self) -> Option<&[u8]> {
+        let mut length: u32 = 0;
+
+        let ret = unsafe { s2n_connection_get_ocsp_response(self.s2n_connection, &mut length) };
+        if ret.is_null() {
+            return None;
+        }
+        unsafe { Some(slice::from_raw_parts(ret, length as usize)) }
+    }
+
+    pub fn get_sct_list(&self) -> Option<&[u8]> {
+        let mut length: u32 = 0;
+
+        let ret = unsafe { s2n_connection_get_sct_list(self.s2n_connection, &mut length) };
+        if ret.is_null() {
+            return None;
+        }
+        unsafe { Some(slice::from_raw_parts(ret, length as usize)) }
     }
 
     pub fn negotiate(&mut self) -> Result<(), ConnectionError> {
@@ -112,9 +272,74 @@ impl Connection {
         }
     }
 
-    pub fn get_client_hello_version(&self) -> Result<ProtocolVersion, ConnectionError> {
-        let ret = unsafe { s2n_connection_get_client_hello_version(self.s2n_connection) };
-        ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
+    pub fn wipe(&mut self) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_wipe(self.s2n_connection) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ConnectionWipeError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub unsafe fn free(&mut self) -> ConnectionResult {
+        let ret = s2n_connection_free(self.s2n_connection);
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ShutdownError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn shutdown(&self) -> ConnectionResult {
+        let mut blocked: s2n_blocked_status = s2n_blocked_status::S2N_NOT_BLOCKED;
+
+        let ret = unsafe { s2n_shutdown(self.s2n_connection, &mut blocked) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ShutdownError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn get_client_auth_type(&self) -> Result<CertAuthType, ConnectionError> {
+        let mut client_auth_type: CertAuthType = CertAuthType::S2N_CERT_AUTH_NONE;
+        let ret = unsafe {
+            s2n_connection_get_client_auth_type(self.s2n_connection, &mut client_auth_type)
+        };
+        match ret {
+            0 => Ok(client_auth_type),
+            -1 => Err(CertAuthTypeError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_client_auth_type(&mut self, client_auth_type: CertAuthType) -> ConnectionResult {
+        let ret =
+            unsafe { s2n_connection_set_client_auth_type(self.s2n_connection, client_auth_type) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CertAuthTypeError),
+            _ => unreachable!(),
+        }
+    }
+
+    // pub fn get_client_cert_chain(&self, der_cert_chain_out: ?) -> u64 {
+    //     s2n_connection_get_client_cert_chain(self.s2n_connection,
+    //                                             der_cert_chain_out:
+    //                                                 *mut *mut u8,
+    //                                             cert_chain_len: *mut u32)
+    // }
+
+    // pub fn set_verify_cert_chain_cb(&self) -> u64 {
+    //     s2n_config_set_verify_cert_chain_cb
+    // }
+
+    pub fn get_wire_bytes_in(&self) -> u64 {
+        unsafe { s2n_connection_get_wire_bytes_in(self.s2n_connection) }
+    }
+
+    pub fn get_wire_bytes_out(&self) -> u64 {
+        unsafe { s2n_connection_get_wire_bytes_out(self.s2n_connection) }
     }
 
     pub fn get_client_protocol_version(&self) -> Result<ProtocolVersion, ConnectionError> {
@@ -132,51 +357,21 @@ impl Connection {
         ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
     }
 
+    pub fn get_client_hello_version(&self) -> Result<ProtocolVersion, ConnectionError> {
+        let ret = unsafe { s2n_connection_get_client_hello_version(self.s2n_connection) };
+        ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
+    }
 
-    // pub fn set_read_fd(&mut self, readfd: FD) -> ConnectionResult {
-    //     let ret = unsafe { s2n_connection_set_read_fd(self.s2n_connection, readfd) };
-    //     match ret {
-    //         0 => Ok(()),
-    //         -1 => Err(ConnectionSetFDError),
-    //         _ => unreachable!(),
-    //     }
-    // }
-
-    // pub fn set_write_fd(&mut self, readfd: FD) -> ConnectionResult {
-    //     let ret = unsafe { s2n_connection_set_write_fd(self.s2n_connection, readfd) };
-    //     match ret {
-    //         0 => Ok(()),
-    //         -1 => Err(ConnectionSetFDError),
-    //         _ => unreachable!(),
-    //     }
-    // }
-
-    pub fn set_server_name(&mut self, server_name: &str) -> ConnectionResult {
-        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
-        let server_name_c = CString::new(server_name).map_err(FFIError)?;
-        let server_name_ptr = server_name_c.as_ptr();
-
-        let ret = unsafe { s2n_set_server_name(self.s2n_connection, server_name_ptr) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ConnectionServerNameError),
+    pub fn client_cert_used(&self) -> bool {
+        match unsafe { s2n_connection_client_cert_used(self.s2n_connection) } {
+            1 => true,
+            0 => false,
             _ => unreachable!(),
         }
     }
 
-    pub fn get_server_name(&mut self) -> Option<String> {
-        let ret = unsafe { s2n_get_server_name(self.s2n_connection) };
-        if ret.is_null() {
-            return None;
-        }
-        unsafe { CStr::from_ptr(ret) }
-            .to_str()
-            .ok()
-            .map(|s| s.to_string())
-    }
-
-    pub fn get_application_protocol(&mut self) -> Option<String> {
-        let ret = unsafe { s2n_get_application_protocol(self.s2n_connection) };
+    pub fn get_cipher(&self) -> Option<String> {
+        let ret = unsafe { s2n_connection_get_cipher(self.s2n_connection) };
         if ret.is_null() {
             return None;
         }
@@ -202,54 +397,19 @@ impl Connection {
         }
     }
 
-    pub fn get_cipher(&mut self) -> Option<String> {
-        let ret = unsafe { s2n_connection_get_cipher(self.s2n_connection) };
-        if ret.is_null() {
-            return None;
-        }
-        unsafe { CStr::from_ptr(ret) }
-            .to_str()
-            .ok()
-            .map(|s| s.to_string())
-    }
-
-    pub fn wipe(&mut self) -> ConnectionResult {
-        let ret = unsafe { s2n_connection_wipe(self.s2n_connection) };
+    pub fn get_alert(&mut self) -> Option<::std::os::raw::c_int> {
+        let ret = unsafe { s2n_connection_get_alert(self.s2n_connection) };
         match ret {
-            0 => Ok(()),
-            -1 => Err(ConnectionWipeError),
+            0 => Some(ret),
+            -1 => None,
             _ => unreachable!(),
         }
     }
 }
-
-impl Connection {
-    pub fn set_context<T>(&mut self, mut ctx: T) -> ConnectionResult {
-        let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
-
-        let ret = unsafe { s2n_connection_set_ctx(self.s2n_connection, ctx_ptr) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ConnectionSetContextError),
-            _ => unreachable!(),
-        }
-    }
-
-    //    pub fn s2n_connection_get_ctx<T>(&self) -> Option<T> {
-    //        let ctx_ptr = unsafe { s2n_connection_get_ctx(self.s2n_connection) };
-    //        if ctx_ptr.is_null() {
-    //            None
-    //        } else {
-    //            let ctx: &mut T = unsafe { &mut *(ctx_ptr as *mut T) };
-    //            Some(ctx)
-    //        }
-    //    }
-}
-
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        unsafe { s2n_connection_free(self.s2n_connection) };
+        let _ = unsafe { self.free() };
     }
 }
 
@@ -378,17 +538,20 @@ mod tests {
 
     #[test]
     fn test_connection_get_server_name() {
-        let mut connection = Connection::new(Mode::S2N_SERVER);
+        let connection = Connection::new(Mode::S2N_SERVER);
         assert!(connection.get_server_name().is_none());
     }
 
-    // #[test]
+    #[test]
     fn test_connection_set_get_server_name() {
-        let mut connection = Connection::new(Mode::S2N_SERVER);
+        ::std::env::set_var("S2N_ENABLE_CLIENT_MODE", "TRUE_FOR_TEST");
+
+        let mut connection = Connection::new(Mode::S2N_CLIENT);
         let name = "server.example.com";
         connection.set_server_name(&name).unwrap();
-        // assert_eq!(connection.get_server_name().unwrap(), name);
+        assert_eq!(connection.get_server_name().unwrap(), name);
 
+        ::std::env::remove_var("S2N_ENABLE_CLIENT_MODE");
     }
 
     #[test]
@@ -419,4 +582,132 @@ mod tests {
     fn test_protocolversion_display() {
         assert_eq!("TLSv1.2", ProtocolVersion::TLS12.to_string())
     }
+
+    #[test]
+    fn test_connection_wire_bytes_out() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        assert_eq!(0, connection.get_wire_bytes_out())
+    }
+
+    #[test]
+    fn test_connection_wire_bytes_in() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        assert_eq!(0, connection.get_wire_bytes_in())
+    }
+
+    #[test]
+    fn test_connection_set_client_auth_type() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection
+            .set_client_auth_type(CertAuthType::S2N_CERT_AUTH_REQUIRED)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_connection_get_client_auth_type() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection
+            .set_client_auth_type(CertAuthType::S2N_CERT_AUTH_REQUIRED)
+            .unwrap();
+        assert_eq!(CertAuthType::S2N_CERT_AUTH_REQUIRED,
+                   connection.get_client_auth_type().unwrap())
+    }
+
+    #[test]
+    fn test_connection_shutdown() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        connection.shutdown().unwrap();
+    }
+
+    #[test]
+    fn test_connection_get_sct_list() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        assert!(connection.get_sct_list().is_none())
+    }
+
+    #[test]
+    fn test_connection_get_ocsp_response() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        assert!(connection.get_ocp_response().is_none())
+    }
+
+    #[test]
+    fn test_connection_get_application_protocol() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        assert!(connection.get_application_protocol().is_none())
+    }
+
+    #[test]
+    fn test_connection_get_delay() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        assert_eq!(0, connection.get_delay())
+    }
+
+    #[test]
+    fn test_connection_set_blinding() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection
+            .set_blinding(Blinding::S2N_SELF_SERVICE_BLINDING)
+            .unwrap()
+    }
+
+    #[test]
+    fn test_connection_prefer_low_latency() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection.prefer_low_latency().unwrap()
+    }
+
+    #[test]
+    fn test_connection_prefer_throughput() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection.prefer_throughput().unwrap()
+    }
+
+    #[test]
+    fn test_connection_use_corked_io() {
+        use std::os::unix::io::AsRawFd;
+
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection
+            .set_fd(::std::io::stdout().as_raw_fd())
+            .unwrap();
+        connection.use_corked_io().unwrap()
+    }
+
+    #[test]
+    fn test_connection_set_write_fd() {
+        use std::os::unix::io::AsRawFd;
+
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection
+            .set_write_fd(::std::io::stdout().as_raw_fd())
+            .unwrap();
+    }
+
+    #[test]
+    fn test_connection_set_read_fd() {
+        use std::os::unix::io::AsRawFd;
+
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+        connection
+            .set_read_fd(::std::io::stdout().as_raw_fd())
+            .unwrap();
+    }
+
+    #[test]
+    fn test_connection_get_context_no_context() {
+        let connection = Connection::new(Mode::S2N_SERVER);
+        assert!(connection.get_context::<bool>().is_none());
+    }
+
+    #[test]
+    fn test_connection_set_context_get_context() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+
+        let context = "hello!".to_string();
+
+        connection.set_context(context.clone()).unwrap();
+        assert_eq!(&context, connection.get_context::<String>().unwrap());
+    }
+
 }

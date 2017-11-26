@@ -10,9 +10,11 @@ use std::sync::{Once, ONCE_INIT};
 mod s2n;
 mod config;
 mod connection;
+mod types;
 
 pub use connection::{Connection, Mode};
-pub use config::{Config, StatusRequestType, TLSExtensionType, CertAuthType};
+pub use config::{Config, StatusRequestType, TLSExtensionType};
+pub use types::CertAuthType;
 
 static START: Once = ONCE_INIT;
 

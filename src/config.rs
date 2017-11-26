@@ -4,7 +4,7 @@ use std::ops::Drop;
 use s2n::*;
 pub use s2n::s2n_status_request_type as StatusRequestType;
 pub use s2n::s2n_tls_extension_type as TLSExtensionType;
-pub use s2n::s2n_cert_auth_type as CertAuthType;
+use types::CertAuthType;
 
 pub struct Config {
     pub(crate) s2n_config: *mut s2n_config,
@@ -209,6 +209,17 @@ impl Config {
     //     }
     // }
 
+    pub fn get_client_auth_type(&self) -> Result<CertAuthType, ConfigError> {
+        let mut client_auth_type: CertAuthType = CertAuthType::S2N_CERT_AUTH_NONE;
+        let ret =
+            unsafe { s2n_config_get_client_auth_type(self.s2n_config, &mut client_auth_type) };
+        match ret {
+            0 => Ok(client_auth_type),
+            -1 => Err(CertAuthTypeError),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn set_client_auth_type(&mut self, cert_auth_type: CertAuthType) -> ConfigResult {
         let ret = unsafe { s2n_config_set_client_auth_type(self.s2n_config, cert_auth_type) };
         match ret {
@@ -330,5 +341,16 @@ mod tests {
         config
             .set_client_auth_type(CertAuthType::S2N_CERT_AUTH_REQUIRED)
             .unwrap();
+    }
+
+    #[test]
+    fn test_config_get_cert_auth_type() {
+        let mut config = Config::new();
+        config
+            .set_client_auth_type(CertAuthType::S2N_CERT_AUTH_REQUIRED)
+            .unwrap();
+
+        assert_eq!(CertAuthType::S2N_CERT_AUTH_REQUIRED,
+                   config.get_client_auth_type().unwrap());
     }
 }
