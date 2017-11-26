@@ -8,6 +8,8 @@ pub use s2n::s2n_cert_auth_type as CertAuthType;
 
 pub struct Config {
     pub(crate) s2n_config: *mut s2n_config,
+    // s2n_config->cert_and_key_pairs is initialised as NULL, but not checked in places
+    has_cert_chain_and_key: bool,
 }
 
 #[derive(Debug, Fail)]
@@ -29,6 +31,9 @@ pub enum ConfigError {
     ExtensionDataError,
     #[fail(display = "Error setting Certificate Authentication type")]
     CertAuthTypeError,
+
+    #[fail(display = "No Certificate or Key added to config")]
+    MissingCertKeyError,
 }
 use self::ConfigError::*;
 
@@ -38,7 +43,13 @@ impl Default for Config {
     fn default() -> Self {
         super::init();
         let s2n_config = unsafe { s2n_config_new() };
-        Self { s2n_config }
+        if s2n_config.is_null() {
+            panic!("Unable to make config")
+        }
+        Self {
+            s2n_config,
+            has_cert_chain_and_key: false,
+        }
     }
 }
 
@@ -76,7 +87,10 @@ impl Config {
                                               private_key_pem_ptr)
         };
         match ret {
-            0 => Ok(()),
+            0 => {
+                self.has_cert_chain_and_key = true;
+                Ok(())
+            }
             -1 => Err(CertChainKeyError),
             _ => unreachable!(),
         }
@@ -136,13 +150,13 @@ impl Config {
         }
     }
 
-    #[allow(dead_code, unused_variables, unreachable_code)]
     pub fn set_extension_data(&mut self,
                               extension_type: TLSExtensionType,
                               data: &[u8])
                               -> ConfigResult {
-        unimplemented!();
-        // Segfault
+        if !self.has_cert_chain_and_key {
+            return Err(MissingCertKeyError);
+        }
         let data_ptr = data.as_ptr();
         let ret = unsafe {
             s2n_config_set_extension_data(self.s2n_config,
@@ -259,7 +273,7 @@ mod tests {
             .unwrap_err();
     }
 
-    // #[test]
+    #[test]
     fn test_config_set_dh_param() {
         let mut config = Config::new();
         let params = include_str!("../test/dhparam.pem");
@@ -280,6 +294,13 @@ mod tests {
     }
 
     #[test]
+    fn test_config_set_protocol_preferences2() {
+        let mut config = Config::new();
+        let protocols = vec!["http/1.1", "spdy/3.1", "myprot/2.7"];
+        config.set_protocol_preferences(&protocols).unwrap();
+    }
+
+    #[test]
     fn test_config_set_status_request_type() {
         let mut config = Config::new();
         config
@@ -287,9 +308,14 @@ mod tests {
             .unwrap();
     }
 
-    // #[test]
+    #[test]
     fn test_config_set_extension_data() {
         let mut config = Config::new();
+
+        let cert = include_str!("../test/apiserver.pem");
+        let key = include_str!("../test/apiserver-key.pem");
+
+        config.add_cert_chain_and_key(cert, key).unwrap();
 
         let data = vec![1, 2, 3];
         config
