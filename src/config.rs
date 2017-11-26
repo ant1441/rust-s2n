@@ -2,9 +2,7 @@ use std::ffi::{self, CString};
 use std::ops::Drop;
 
 use s2n::*;
-pub use s2n::s2n_status_request_type as StatusRequestType;
-pub use s2n::s2n_tls_extension_type as TLSExtensionType;
-use types::CertAuthType;
+use types::*;
 
 pub struct Config {
     pub(crate) s2n_config: *mut s2n_config,
