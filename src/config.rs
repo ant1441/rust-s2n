@@ -19,6 +19,8 @@ pub enum ConfigError {
     CipherPreferencesError(String),
     #[fail(display = "Invalid Certificate chain or Private key")]
     CertChainKeyError,
+    #[fail(display = "Free Error")]
+    FreeError,
     #[fail(display = "Invalid Diffe-Hellman parameters")]
     DHParamsError,
     #[fail(display = "Invalid Protocol Preferences")]
@@ -62,8 +64,33 @@ impl Config {
         Default::default()
     }
 
-    // s2n_config_free_dhparams
-    // s2n_config_free_cert_chain_and_key
+    pub unsafe fn free(&mut self) -> ConfigResult {
+        let ret = s2n_config_free(self.s2n_config);
+        match ret {
+            0 => Ok(()),
+            -1 => Err(FreeError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub unsafe fn free_dhparams(&mut self) -> ConfigResult {
+        let ret = s2n_config_free_dhparams(self.s2n_config);
+        match ret {
+            0 => Ok(()),
+            -1 => Err(FreeError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub unsafe fn free_cert_chain_and_key(&mut self) -> ConfigResult {
+        let ret = s2n_config_free_cert_chain_and_key(self.s2n_config);
+        self.has_cert_chain_and_key = false;
+        match ret {
+            0 => Ok(()),
+            -1 => Err(FreeError),
+            _ => unreachable!(),
+        }
+    }
 
     // pub fn set_nanoseconds_since_epoch_callback<'d, F, D>(&self,
     //                                                                  callback: Option<&'d F>,
@@ -283,7 +310,7 @@ impl Config {
 
 impl Drop for Config {
     fn drop(&mut self) {
-        unsafe { s2n_config_free(self.s2n_config) };
+        let _ = unsafe { self.free() };
     }
 }
 

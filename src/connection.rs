@@ -50,6 +50,8 @@ pub enum ConnectionError {
     SendError,
     #[fail(display = "Shutdown Error")]
     ShutdownError,
+    #[fail(display = "Free Error")]
+    FreeError,
     #[fail(display = "Error setting Blinding")]
     ConnectionSetBlindingError,
     #[fail(display = "Error setting Latency or Throughput")]
@@ -91,13 +93,6 @@ impl<C> Connection<C> {
         }
     }
 
-    pub fn set_tcp_stream(&mut self, stream: &TcpStream) -> ConnectionResult {
-        use std::os::unix::io::AsRawFd;
-
-        let fd = stream.as_raw_fd();
-        self.set_fd(fd)
-    }
-
     pub fn set_context(&mut self, mut ctx: C) -> ConnectionResult {
         let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
 
@@ -118,6 +113,9 @@ impl<C> Connection<C> {
             Some(ctx)
         }
     }
+
+    // s2n_client_hello_fn
+    // s2n_config_set_client_hello_cb
 
     pub fn set_fd(&mut self, readfd: RawFd) -> ConnectionResult {
         let ret = unsafe { s2n_connection_set_fd(self.s2n_connection, readfd) };
@@ -259,15 +257,15 @@ impl<C> Connection<C> {
     }
 
     pub fn negotiate_nonblocking(&mut self) -> Result<Option<Blocked>, ConnectionError> {
-        let mut blocked: s2n_blocked_status = s2n_blocked_status::S2N_NOT_BLOCKED;
+        let mut blocked: BlockedStatus = BlockedStatus::S2N_NOT_BLOCKED;
 
         let ret = unsafe { s2n_negotiate(self.s2n_connection, &mut blocked) };
         match ret {
             0 => {
                 match blocked {
-                    s2n_blocked_status::S2N_NOT_BLOCKED => Ok(None),
-                    s2n_blocked_status::S2N_BLOCKED_ON_READ => Ok(Some(Blocked::OnRead)),
-                    s2n_blocked_status::S2N_BLOCKED_ON_WRITE => Ok(Some(Blocked::OnWrite)),
+                    BlockedStatus::S2N_NOT_BLOCKED => Ok(None),
+                    BlockedStatus::S2N_BLOCKED_ON_READ => Ok(Some(Blocked::OnRead)),
+                    BlockedStatus::S2N_BLOCKED_ON_WRITE => Ok(Some(Blocked::OnWrite)),
                 }
             }
             -1 => Err(ConnectionNegotiateError),
@@ -288,13 +286,13 @@ impl<C> Connection<C> {
         let ret = s2n_connection_free(self.s2n_connection);
         match ret {
             0 => Ok(()),
-            -1 => Err(ShutdownError),
+            -1 => Err(FreeError),
             _ => unreachable!(),
         }
     }
 
     pub fn shutdown(&self) -> ConnectionResult {
-        let mut blocked: s2n_blocked_status = s2n_blocked_status::S2N_NOT_BLOCKED;
+        let mut blocked: BlockedStatus = BlockedStatus::S2N_NOT_BLOCKED;
 
         let ret = unsafe { s2n_shutdown(self.s2n_connection, &mut blocked) };
         match ret {
@@ -344,6 +342,8 @@ impl<C> Connection<C> {
             _ => unreachable!(),
         }
     }
+
+    // verify_cert_trust_chain_fn
 
     pub fn get_wire_bytes_in(&self) -> u64 {
         unsafe { s2n_connection_get_wire_bytes_in(self.s2n_connection) }
@@ -417,6 +417,17 @@ impl<C> Connection<C> {
         }
     }
 }
+
+
+impl<C> Connection<C> {
+    pub fn set_tcp_stream(&mut self, stream: &TcpStream) -> ConnectionResult {
+        use std::os::unix::io::AsRawFd;
+
+        let fd = stream.as_raw_fd();
+        self.set_fd(fd)
+    }
+}
+
 
 impl<C> Drop for Connection<C> {
     fn drop(&mut self) {
