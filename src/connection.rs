@@ -327,7 +327,7 @@ impl<C> Connection<C> {
     }
 
     pub fn get_client_cert_chain(&self) -> Result<&[u8], ConnectionError> {
-        let mut der_cert_chain_out: &[u8] = &[];
+        let der_cert_chain_out: &[u8] = &[];
         let mut cert_chain_len: u32 = 0;
 
         let der_cert_chain_out_ptr = der_cert_chain_out.as_ptr() as *mut *mut u8;
@@ -715,10 +715,28 @@ mod tests {
     fn test_connection_set_context_get_context() {
         let mut connection = Connection::new(Mode::S2N_SERVER);
 
-        let context = "hello!".to_string();
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        enum Example {
+            One,
+            Two,
+        }
 
-        connection.set_context(context.clone()).unwrap();
+        let context = Example::One;
+
+        connection.set_context(context).unwrap();
         assert_eq!(&context, connection.get_context().unwrap());
     }
 
+
+    #[test]
+    #[ignore]
+    fn test_connection_set_context_get_context_string() {
+        let mut connection = Connection::new(Mode::S2N_SERVER);
+
+        let context = "Hello";
+        ::std::mem::forget(context);
+
+        connection.set_context(context).unwrap();
+        assert_eq!(&context, connection.get_context().unwrap());
+    }
 }

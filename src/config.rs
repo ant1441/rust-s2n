@@ -29,6 +29,10 @@ pub enum ConfigError {
     ExtensionDataError,
     #[fail(display = "Error setting Certificate Authentication type")]
     CertAuthTypeError,
+    #[fail(display = "Error setting Certificate Transparency support level")]
+    CTSupportLevelError,
+    #[fail(display = "Error setting Max Fragment length")]
+    MaxFragmentLengthError,
 
     #[fail(display = "No Certificate or Key added to config")]
     MissingCertKeyError,
@@ -52,22 +56,45 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Returns a new configuration object suitable for associating certs and keys.
+    /// This object can (and should) be associated with many connection objects.
     pub fn new() -> Self {
         Default::default()
     }
 
-    pub fn set_cipher_preferences(&mut self, version: &str) -> ConfigResult {
-        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
-        let version_c = CString::new(version).map_err(FFIError)?;
-        let version_ptr = version_c.as_ptr();
+    // s2n_config_free_dhparams
+    // s2n_config_free_cert_chain_and_key
 
-        let ret = unsafe { s2n_config_set_cipher_preferences(self.s2n_config, version_ptr) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CipherPreferencesError(version.to_owned())),
-            _ => unreachable!(),
-        }
-    }
+    // pub fn set_nanoseconds_since_epoch_callback<'d, F, D>(&self,
+    //                                                                  callback: Option<&'d F>,
+    //                                                                  data: &'d D)
+    //                                                                  -> ConfigResult {
+    //     unsafe extern "C" fn c_callback(data_ptr: *mut ::std::os::raw::c_void,
+    //                                     seconds: *mut u64)
+    //                                     -> ::std::os::raw::c_int {
+    //         let data = data_ptr as D;
+    //         *seconds = callback.map(|f| f(data, seconds as u64));
+    //
+    //         0
+    //     }
+    //
+    //     let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
+    //
+    //     let ret = unsafe {
+    //         s2n_config_set_nanoseconds_since_epoch_callback(self.s2n_config,
+    //                                                         Some(c_callback),
+    //                                                         data_ptr)
+    //     };
+    //     match ret {
+    //         0 => Ok(()),
+    //         -1 => Err(ExtensionDataError),
+    //         _ => unreachable!(),
+    //     }
+    // }
+
+    // s2n_config_set_cache_store_callback
+    // s2n_config_set_cache_retrieve_callback
+    // s2n_config_set_cache_delete_callback
 
     pub fn add_cert_chain_and_key(&mut self,
                                   cert_chain_pem: &str,
@@ -103,6 +130,19 @@ impl Config {
         match ret {
             0 => Ok(()),
             -1 => Err(DHParamsError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_cipher_preferences(&mut self, version: &str) -> ConfigResult {
+        // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
+        let version_c = CString::new(version).map_err(FFIError)?;
+        let version_ptr = version_c.as_ptr();
+
+        let ret = unsafe { s2n_config_set_cipher_preferences(self.s2n_config, version_ptr) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CipherPreferencesError(version.to_owned())),
             _ => unreachable!(),
         }
     }
@@ -148,6 +188,16 @@ impl Config {
         }
     }
 
+    pub fn set_ct_support_level(&mut self, ct_support_level: CTSupportLevel) -> ConfigResult {
+        let ret = unsafe { s2n_config_set_ct_support_level(self.s2n_config, ct_support_level) };
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CTSupportLevelError),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn set_extension_data(&mut self,
                               extension_type: TLSExtensionType,
                               data: &[u8])
@@ -169,37 +219,38 @@ impl Config {
         }
     }
 
-    // pub fn set_nanoseconds_since_epoch_callback<'d, F, D>(&self,
-    //                                                                  callback: Option<&'d F>,
-    //                                                                  data: &'d D)
-    //                                                                  -> ConfigResult {
-    //     unsafe extern "C" fn c_callback(data_ptr: *mut ::std::os::raw::c_void,
-    //                                     seconds: *mut u64)
-    //                                     -> ::std::os::raw::c_int {
-    //         let data = data_ptr as D;
-    //         *seconds = callback.map(|f| f(data, seconds as u64));
+    /// send_max_fragment_length allows the caller to set a TLS Maximum Fragment Length
+    /// extension that will be used to fragment outgoing messages.
+    /// s2n currently does not reject fragments larger than the configured maximum when
+    /// in server mode.
+    /// The TLS negotiated maximum fragment length overrides the preference set by the
+    /// s2n_connection_prefer_throughput and s2n_connection_prefer_low_latency.
+    pub fn send_max_fragment_length(&mut self, mfl_code: MaxFragLen) -> ConfigResult {
+        let ret = unsafe { s2n_config_send_max_fragment_length(self.s2n_config, mfl_code) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(MaxFragmentLengthError),
+            _ => unreachable!(),
+        }
+    }
 
-    //         0
-    //     }
-
-    //     let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
-
-    //     let ret = unsafe {
-    //         s2n_config_set_nanoseconds_since_epoch_callback(self.s2n_config,
-    //                                                         Some(c_callback),
-    //                                                         data_ptr)
-    //     };
-    //     match ret {
-    //         0 => Ok(()),
-    //         -1 => Err(ExtensionDataError),
-    //         _ => unreachable!(),
-    //     }
-    // }
+    /// s2n_config_accept_max_fragment_length allows the server to opt-in to accept client's TLS
+    /// maximum fragment length extension requests. If this API is not called, and client requests
+    /// the extension, server will ignore the request and continue TLS handshake with default
+    /// maximum fragment length of 8k bytes
+    pub fn accept_max_fragment_length(&mut self) -> ConfigResult {
+        let ret = unsafe { s2n_config_accept_max_fragment_length(self.s2n_config) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(MaxFragmentLengthError),
+            _ => unreachable!(),
+        }
+    }
 
     // pub fn set_client_hello_cb<F, D>(&mut self, callback: Option<F>, ctx: D) -> ConfigResult {
     //     let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
     //     let ret = unsafe { s2n_config_set_client_hello_cb(self.s2n_config, callback, ctx_ptr) };
-
+    //
     //     match ret {
     //         0 => Ok(()),
     //         -1 => Err(ExtensionDataError),
@@ -226,6 +277,8 @@ impl Config {
             _ => unreachable!(),
         }
     }
+
+    // s2n_config_set_verify_cert_chain_cb
 }
 
 impl Drop for Config {
