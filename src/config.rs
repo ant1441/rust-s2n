@@ -35,6 +35,8 @@ pub enum ConfigError {
     CTSupportLevelError,
     #[fail(display = "Error setting Max Fragment length")]
     MaxFragmentLengthError,
+    #[fail(display = "Error setting callback")]
+    CallbackError,
 
     #[fail(display = "No Certificate or Key added to config")]
     MissingCertKeyError,
@@ -92,36 +94,84 @@ impl Config {
         }
     }
 
-    // pub fn set_nanoseconds_since_epoch_callback<'d, F, D>(&self,
-    //                                                                  callback: Option<&'d F>,
-    //                                                                  data: &'d D)
-    //                                                                  -> ConfigResult {
-    //     unsafe extern "C" fn c_callback(data_ptr: *mut ::std::os::raw::c_void,
-    //                                     seconds: *mut u64)
-    //                                     -> ::std::os::raw::c_int {
-    //         let data = data_ptr as D;
-    //         *seconds = callback.map(|f| f(data, seconds as u64));
-    //
-    //         0
-    //     }
-    //
-    //     let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
-    //
-    //     let ret = unsafe {
-    //         s2n_config_set_nanoseconds_since_epoch_callback(self.s2n_config,
-    //                                                         Some(c_callback),
-    //                                                         data_ptr)
-    //     };
-    //     match ret {
-    //         0 => Ok(()),
-    //         -1 => Err(ExtensionDataError),
-    //         _ => unreachable!(),
-    //     }
-    // }
 
-    // s2n_config_set_cache_store_callback
-    // s2n_config_set_cache_retrieve_callback
-    // s2n_config_set_cache_delete_callback
+    pub fn set_nanoseconds_since_epoch_callback<D>(&mut self,
+                                                   callback: NanosecondsSinceEpochFn,
+                                                   mut data: D)
+                                                   -> ConfigResult {
+        let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe {
+            s2n_config_set_nanoseconds_since_epoch_callback(self.s2n_config,
+                                                            Some(callback),
+                                                            data_ptr)
+        };
+
+        ::std::mem::forget(data);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_cache_store_callback<D>(&mut self,
+                                       callback: CacheStoreFn,
+                                       mut data: D)
+                                       -> ConfigResult {
+        let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe {
+            s2n_config_set_cache_store_callback(self.s2n_config, Some(callback), data_ptr)
+        };
+
+        ::std::mem::forget(data);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_cache_retrieve_callback<D>(&mut self,
+                                          callback: CacheRetreiveFn,
+                                          mut data: D)
+                                          -> ConfigResult {
+        let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe {
+            s2n_config_set_cache_retrieve_callback(self.s2n_config, Some(callback), data_ptr)
+        };
+
+        ::std::mem::forget(data);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_cache_delete_callback<D>(&mut self,
+                                        callback: CacheDeleteFn,
+                                        mut data: D)
+                                        -> ConfigResult {
+        let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe {
+            s2n_config_set_cache_delete_callback(self.s2n_config, Some(callback), data_ptr)
+        };
+
+        ::std::mem::forget(data);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
 
     pub fn add_cert_chain_and_key(&mut self,
                                   cert_chain_pem: &str,
@@ -274,16 +324,19 @@ impl Config {
         }
     }
 
-    // pub fn set_client_hello_cb<F, D>(&mut self, callback: Option<F>, ctx: D) -> ConfigResult {
-    //     let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
-    //     let ret = unsafe { s2n_config_set_client_hello_cb(self.s2n_config, callback, ctx_ptr) };
-    //
-    //     match ret {
-    //         0 => Ok(()),
-    //         -1 => Err(ExtensionDataError),
-    //         _ => unreachable!(),
-    //     }
-    // }
+    pub fn set_client_hello_cb<D>(&mut self, callback: ClientHelloFn, mut ctx: D) -> ConfigResult {
+        let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe { s2n_config_set_client_hello_cb(self.s2n_config, callback, ctx_ptr) };
+
+        ::std::mem::forget(ctx);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
 
     pub fn get_client_auth_type(&self) -> Result<CertAuthType, ConfigError> {
         let mut client_auth_type: CertAuthType = CertAuthType::S2N_CERT_AUTH_NONE;
@@ -305,7 +358,24 @@ impl Config {
         }
     }
 
-    // s2n_config_set_verify_cert_chain_cb
+    pub fn set_verify_cert_chain_cb<D>(&mut self,
+                                       callback: VerifyCertTrustChainFn,
+                                       mut ctx: D)
+                                       -> ConfigResult {
+        let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe {
+            s2n_config_set_verify_cert_chain_cb(self.s2n_config, Some(callback), ctx_ptr)
+        };
+
+        ::std::mem::forget(ctx);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Drop for Config {
@@ -430,5 +500,116 @@ mod tests {
 
         assert_eq!(CertAuthType::S2N_CERT_AUTH_REQUIRED,
                    config.get_client_auth_type().unwrap());
+    }
+
+    #[test]
+    fn test_config_set_client_hello_cb_no_func() {
+        let mut config = Config::new();
+
+        config
+            .set_client_hello_cb::<Option<()>>(None, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_config_set_client_hello_cb_func() {
+        let mut config = Config::new();
+
+        unsafe extern "C" fn test(_: *mut s2n_connection,
+                                  _: *mut ::std::os::raw::c_void)
+                                  -> ::std::os::raw::c_int {
+            unimplemented!()
+        }
+
+        config
+            .set_client_hello_cb::<Option<()>>(Some(test), None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_config_set_verify_cert_chain_cb_func() {
+        let mut config = Config::new();
+
+        unsafe extern "C" fn test(_conn: *mut s2n_connection,
+                                  _der_cert_chain_in: *mut u8,
+                                  _cert_chain_len: u32,
+                                  _cert_type: *mut s2n_cert_type,
+                                  _public_key_out: *mut s2n_cert_public_key,
+                                  _context: *mut ::std::os::raw::c_void)
+                                  -> CertValidationCode {
+            unimplemented!()
+        }
+
+        config
+            .set_verify_cert_chain_cb::<Option<()>>(test, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_config_set_nanoseconds_since_epoch_callback() {
+        let mut config = Config::new();
+
+        unsafe extern "C" fn test(_data: *mut ::std::os::raw::c_void,
+                                  _unix_time: *mut u64)
+                                  -> ::std::os::raw::c_int {
+            unimplemented!()
+        }
+
+        config
+            .set_nanoseconds_since_epoch_callback::<Option<()>>(test, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_config_set_cache_store_callback() {
+        let mut config = Config::new();
+
+        unsafe extern "C" fn test(_data: *mut ::std::os::raw::c_void,
+                                  _ttl_in_seconds: u64,
+                                  _key: *const ::std::os::raw::c_void,
+                                  _key_size: u64,
+                                  _value: *const ::std::os::raw::c_void,
+                                  _value_size: u64)
+                                  -> ::std::os::raw::c_int {
+            unimplemented!()
+        }
+
+        config
+            .set_cache_store_callback::<Option<()>>(test, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_config_set_cache_retrieve_callback() {
+        let mut config = Config::new();
+
+        unsafe extern "C" fn test(_data: *mut ::std::os::raw::c_void,
+                                  _key: *const ::std::os::raw::c_void,
+                                  _key_size: u64,
+                                  _value: *mut ::std::os::raw::c_void,
+                                  _value_size: *mut u64)
+                                  -> ::std::os::raw::c_int {
+            unimplemented!()
+        }
+
+        config
+            .set_cache_retrieve_callback::<Option<()>>(test, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn test_config_set_cache_delete_callback() {
+        let mut config = Config::new();
+
+        unsafe extern "C" fn test(_data: *mut ::std::os::raw::c_void,
+                                  _key: *const ::std::os::raw::c_void,
+                                  _key_size: u64)
+                                  -> ::std::os::raw::c_int {
+            unimplemented!()
+        }
+
+        config
+            .set_cache_delete_callback::<Option<()>>(test, None)
+            .unwrap();
     }
 }
