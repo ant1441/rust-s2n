@@ -1,6 +1,6 @@
 [package]
 authors = ["Adam <adam@hodgen.uk>"]
-name = "s2n-bindgen"
+name = "s2n"
 version = "0.1.0"
 
 [build-dependencies]

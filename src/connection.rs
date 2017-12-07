@@ -60,6 +60,10 @@ pub enum ConnectionError {
     SetCorkedIOError,
     #[fail(display = "Error with Client Cert Chain")]
     ClientCertChainError,
+    #[fail(display = "Error with Context")]
+    ContextError,
+    #[fail(display = "Error setting callback")]
+    CallbackError,
 }
 use self::ConnectionError::*;
 
@@ -114,9 +118,6 @@ impl<C> Connection<C> {
         }
     }
 
-    // s2n_client_hello_fn
-    // s2n_config_set_client_hello_cb
-
     pub fn set_fd(&mut self, readfd: RawFd) -> ConnectionResult {
         let ret = unsafe { s2n_connection_set_fd(self.s2n_connection, readfd) };
         match ret {
@@ -153,11 +154,51 @@ impl<C> Connection<C> {
         }
     }
 
-    // TODO s2n_connection_set_recv_ctx
-    // TODO s2n_connection_set_send_ctx
+    pub fn set_recv_ctx<RC>(&mut self, mut ctx: RC) -> ConnectionResult {
+        let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
 
-    // TODO s2n_connection_set_recv_cb
-    // TODO s2n_connection_set_send_cb
+        let ret = unsafe { s2n_connection_set_recv_ctx(self.s2n_connection, ctx_ptr) };
+
+        ::std::mem::forget(ctx);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ContextError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_send_ctx<RC>(&mut self, mut ctx: RC) -> ConnectionResult {
+        let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
+
+        let ret = unsafe { s2n_connection_set_send_ctx(self.s2n_connection, ctx_ptr) };
+
+        ::std::mem::forget(ctx);
+
+        match ret {
+            0 => Ok(()),
+            -1 => Err(ContextError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_recv_cb(&mut self, callback: RecvFn) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_set_recv_cb(self.s2n_connection, callback) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn set_send_cb(&mut self, callback: SendFn) -> ConnectionResult {
+        let ret = unsafe { s2n_connection_set_send_cb(self.s2n_connection, callback) };
+        match ret {
+            0 => Ok(()),
+            -1 => Err(CallbackError),
+            _ => unreachable!(),
+        }
+    }
 
     pub fn prefer_throughput(&mut self) -> ConnectionResult {
         let ret = unsafe { s2n_connection_prefer_throughput(self.s2n_connection) };
@@ -342,8 +383,6 @@ impl<C> Connection<C> {
             _ => unreachable!(),
         }
     }
-
-    // verify_cert_trust_chain_fn
 
     pub fn get_wire_bytes_in(&self) -> u64 {
         unsafe { s2n_connection_get_wire_bytes_in(self.s2n_connection) }
@@ -694,6 +733,52 @@ mod tests {
             .set_fd(::std::io::stdout().as_raw_fd())
             .unwrap();
         connection.use_corked_io().unwrap()
+    }
+
+    #[test]
+    fn test_connection_set_recv_ctx() {
+        let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
+
+        let ctx = ();
+
+        connection.set_recv_ctx(ctx).unwrap()
+    }
+
+    #[test]
+    fn test_connection_set_send_ctx() {
+        let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
+
+        let ctx = ();
+
+        connection.set_send_ctx(ctx).unwrap()
+    }
+
+    #[test]
+    fn test_connection_set_recv_cb() {
+        let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
+
+        unsafe extern "C" fn test(_io_context: *mut ::std::os::raw::c_void,
+                                  _buf: *mut u8,
+                                  _len: u32)
+                                  -> i32 {
+            unimplemented!()
+        }
+
+        connection.set_recv_cb(Some(test)).unwrap()
+    }
+
+    #[test]
+    fn test_connection_set_send_cb() {
+        let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
+
+        unsafe extern "C" fn test(_io_context: *mut ::std::os::raw::c_void,
+                                  _buf: *const u8,
+                                  _len: u32)
+                                  -> i32 {
+            unimplemented!()
+        }
+
+        connection.set_send_cb(Some(test)).unwrap()
     }
 
     #[test]

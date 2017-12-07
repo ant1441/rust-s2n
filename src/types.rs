@@ -14,6 +14,9 @@ pub use s2n::s2n_cert_type as CertType;
 
 
 pub use s2n::s2n_client_hello_fn as ClientHelloFn;
+pub use s2n::s2n_recv_fn as RecvFn;
+pub use s2n::s2n_send_fn as SendFn;
+
 pub type VerifyCertTrustChainFn =
     unsafe extern "C" fn(conn: *mut s2n::s2n_connection,
                          der_cert_chain_in: *mut u8,
