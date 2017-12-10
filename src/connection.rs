@@ -267,7 +267,7 @@ impl<C> Connection<C> {
             .map(|s| s.to_string())
     }
 
-    pub fn get_ocp_response(&self) -> Option<&[u8]> {
+    pub fn get_ocsp_response(&self) -> Option<&[u8]> {
         let mut length: u32 = 0;
 
         let ret = unsafe { s2n_connection_get_ocsp_response(self.s2n_connection, &mut length) };
@@ -689,7 +689,7 @@ mod tests {
     #[test]
     fn test_connection_get_ocsp_response() {
         let connection: Connection = Connection::new(Mode::S2N_SERVER);
-        assert!(connection.get_ocp_response().is_none())
+        assert!(connection.get_ocsp_response().is_none())
     }
 
     #[test]
