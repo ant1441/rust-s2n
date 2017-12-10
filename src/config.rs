@@ -35,16 +35,10 @@ pub enum ConfigError {
     DHParamsError,
     #[fail(display = "Invalid Protocol Preferences")]
     ProtocolPreferencesError,
-    #[fail(display = "Invalid Status Request Type")]
-    StatusRequestTypeError,
     #[fail(display = "Invalid Extension Data")]
     ExtensionDataError,
     #[fail(display = "Error setting Certificate Authentication type")]
     CertAuthTypeError,
-    #[fail(display = "Error setting Certificate Transparency support level")]
-    CTSupportLevelError,
-    #[fail(display = "Error setting Max Fragment length")]
-    MaxFragmentLengthError,
     #[fail(display = "Error setting callback")]
     CallbackError,
 
@@ -171,8 +165,7 @@ impl Config {
     /// `callback` is permanently leaked by this.
     pub fn set_nanoseconds_since_epoch_callback<D>(&mut self,
                                                    callback: NanosecondsSinceEpochFn,
-                                                   mut data: D)
-                                                   -> ConfigResult {
+                                                   mut data: D) {
         let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe {
@@ -183,11 +176,10 @@ impl Config {
 
         ::std::mem::forget(data);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+        // The return can only be non-0 if the callback is Null, which is not possible here
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from set_nanoseconds_since_epoch_callback")
     }
 
     /// Allows setting a callback function that will be used to store SSL session
@@ -210,10 +202,7 @@ impl Config {
     /// Eventually this should be wrapped for safety.
     ///
     /// `callback` is permanently leaked by this.
-    pub fn set_cache_store_callback<D>(&mut self,
-                                       callback: CacheStoreFn,
-                                       mut data: D)
-                                       -> ConfigResult {
+    pub fn set_cache_store_callback<D>(&mut self, callback: CacheStoreFn, mut data: D) {
         let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe {
@@ -222,12 +211,12 @@ impl Config {
 
         ::std::mem::forget(data);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+        // The return can only be non-0 if the callback is Null, which is not possible here
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_set_cache_store_callback")
     }
+
 
     /// Allows setting a callback function that will be used to retrieve SSL session
     /// data from a cache.
@@ -251,10 +240,7 @@ impl Config {
     /// Eventually this should be wrapped for safety.
     ///
     /// `callback` is permanently leaked by this.
-    pub fn set_cache_retrieve_callback<D>(&mut self,
-                                          callback: CacheRetreiveFn,
-                                          mut data: D)
-                                          -> ConfigResult {
+    pub fn set_cache_retrieve_callback<D>(&mut self, callback: CacheRetreiveFn, mut data: D) {
         let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe {
@@ -263,13 +249,13 @@ impl Config {
 
         ::std::mem::forget(data);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+        // The return can only be non-0 if the callback is Null, which is not possible here
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_set_cache_retrieve_callback")
     }
 
+    ///
     /// Allows setting a callback function that will be used to delete SSL session
     /// data from a cache.
     ///
@@ -287,10 +273,7 @@ impl Config {
     /// Eventually this should be wrapped for safety.
     ///
     /// `callback` is permanently leaked by this.
-    pub fn set_cache_delete_callback<D>(&mut self,
-                                        callback: CacheDeleteFn,
-                                        mut data: D)
-                                        -> ConfigResult {
+    pub fn set_cache_delete_callback<D>(&mut self, callback: CacheDeleteFn, mut data: D) {
         let data_ptr = &mut data as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe {
@@ -299,11 +282,10 @@ impl Config {
 
         ::std::mem::forget(data);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+        // The return can only be non-0 if the callback is Null, which is not possible here
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_set_cache_delete_callback")
     }
 
     /// Associates a certificate chain and a private key, with a `Config` struct.
@@ -512,24 +494,20 @@ impl Config {
     /// Set up an **S2N_CLIENT** to request the server certificate status
     /// during an SSL handshake.
     /// If set to [S2N_STATUS_REQUEST_NONE](enum.StatusRequestType.html#variant.S2N_STATUS_REQUEST_NONE), no status request is made.
-    pub fn set_status_request_type(&mut self, request_type: StatusRequestType) -> ConfigResult {
+    pub fn set_status_request_type(&mut self, request_type: StatusRequestType) {
         let ret = unsafe { s2n_config_set_status_request_type(self.s2n_config, request_type) };
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(StatusRequestTypeError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_set_status_request_type")
     }
 
-    pub fn set_ct_support_level(&mut self, ct_support_level: CTSupportLevel) -> ConfigResult {
+    pub fn set_ct_support_level(&mut self, ct_support_level: CTSupportLevel) {
         let ret = unsafe { s2n_config_set_ct_support_level(self.s2n_config, ct_support_level) };
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CTSupportLevelError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_set_ct_support_level")
     }
 
     /// Sets the extension data in the `Config` struct for the specified extension.
@@ -578,26 +556,24 @@ impl Config {
     /// The TLS negotiated maximum fragment length overrides the preference set by
     /// [`prefer_throughput`](struct.Connection.html#method.prefer_throughput) and
     /// [`prefer_low_latency`](struct.Connection.html#method.prefer_low_latency).
-    pub fn send_max_fragment_length(&mut self, mfl_code: MaxFragLen) -> ConfigResult {
+    pub fn send_max_fragment_length(&mut self, mfl_code: MaxFragLen) {
         let ret = unsafe { s2n_config_send_max_fragment_length(self.s2n_config, mfl_code) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(MaxFragmentLengthError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_send_max_fragment_length")
     }
 
     /// Allows the server to opt-in to accept client's TLS maximum fragment length extension requests.
     ///
     /// If this API is not called, and client requests the extension, server will ignore the request
     /// and continue TLS handshake with default maximum fragment length of 8k bytes.
-    pub fn accept_max_fragment_length(&mut self) -> ConfigResult {
+    pub fn accept_max_fragment_length(&mut self) {
         let ret = unsafe { s2n_config_accept_max_fragment_length(self.s2n_config) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(MaxFragmentLengthError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_accept_max_fragment_length")
     }
 
     /// Set a callback function that will be called after *ClientHello* was parsed.
@@ -618,18 +594,17 @@ impl Config {
     /// Eventually this should be wrapped for safety.
     ///
     /// `callback` and `ctx` are permanently leaked by this.
-    pub fn set_client_hello_cb<D>(&mut self, callback: ClientHelloFn, mut ctx: D) -> ConfigResult {
+    pub fn set_client_hello_cb<D>(&mut self, callback: ClientHelloFn, mut ctx: D) {
         let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe { s2n_config_set_client_hello_cb(self.s2n_config, callback, ctx_ptr) };
 
         ::std::mem::forget(ctx);
+        ::std::mem::forget(callback);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_config_set_client_hello_cb")
     }
 
     pub fn get_client_auth_type(&self) -> Result<CertAuthType, ConfigError> {
@@ -861,7 +836,7 @@ mod tests {
 
         config
             .set_client_hello_cb::<Option<()>>(None, None)
-            .unwrap();
+            ;
     }
 
     #[test]
@@ -876,7 +851,7 @@ mod tests {
 
         config
             .set_client_hello_cb::<Option<()>>(Some(test), None)
-            .unwrap();
+            ;
     }
 
     #[test]
@@ -908,9 +883,7 @@ mod tests {
             unimplemented!()
         }
 
-        config
-            .set_nanoseconds_since_epoch_callback::<Option<()>>(test, None)
-            .unwrap();
+        config.set_nanoseconds_since_epoch_callback::<Option<()>>(test, None);
     }
 
     #[test]
@@ -927,9 +900,7 @@ mod tests {
             unimplemented!()
         }
 
-        config
-            .set_cache_store_callback::<Option<()>>(test, None)
-            .unwrap();
+        config.set_cache_store_callback::<Option<()>>(test, None);
     }
 
     #[test]
@@ -945,9 +916,7 @@ mod tests {
             unimplemented!()
         }
 
-        config
-            .set_cache_retrieve_callback::<Option<()>>(test, None)
-            .unwrap();
+        config.set_cache_retrieve_callback::<Option<()>>(test, None);
     }
 
     #[test]
@@ -961,8 +930,6 @@ mod tests {
             unimplemented!()
         }
 
-        config
-            .set_cache_delete_callback::<Option<()>>(test, None)
-            .unwrap();
+        config.set_cache_delete_callback::<Option<()>>(test, None);
     }
 }
