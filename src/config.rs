@@ -1,4 +1,5 @@
 use std::ffi::{self, CString};
+use std::fmt;
 use std::ops::Drop;
 
 use s2n::*;
@@ -8,6 +9,12 @@ pub struct Config {
     pub(crate) s2n_config: *mut s2n_config,
     // s2n_config->cert_and_key_pairs is initialised as NULL, but not checked in places
     has_cert_chain_and_key: bool,
+}
+
+impl fmt::Debug for Config {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Config {{ s2n_config: {:p} }}", self.s2n_config)
+    }
 }
 
 #[derive(Debug, Fail)]
