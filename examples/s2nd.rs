@@ -21,7 +21,7 @@ pub fn main() {
 
     let mut connection: s2n::Connection = Default::default();
 
-    connection.set_config(&config).unwrap();
+    connection.set_config(&config);
 
     let listener = TcpListener::bind((host, port)).unwrap();
     println!("Listening on {}:{}", host, port);

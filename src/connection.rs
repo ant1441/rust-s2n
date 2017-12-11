@@ -30,10 +30,6 @@ pub enum ConnectionError {
     ConnectionWipeError,
     #[fail(display = "Error getting curve")]
     GetCurveError,
-    #[fail(display = "Error setting connection config")]
-    ConnectionSetConfigError,
-    #[fail(display = "Error setting connection context")]
-    ConnectionSetContextError,
     #[fail(display = "Error setting connection file descripter")]
     ConnectionSetFDError,
     #[fail(display = "Error setting connection server name")]
@@ -52,18 +48,10 @@ pub enum ConnectionError {
     ShutdownError,
     #[fail(display = "Free Error")]
     FreeError,
-    #[fail(display = "Error setting Blinding")]
-    ConnectionSetBlindingError,
-    #[fail(display = "Error setting Latency or Throughput")]
-    SetLatencyThroughputError,
     #[fail(display = "Error setting CorkedIO")]
     SetCorkedIOError,
     #[fail(display = "Error with Client Cert Chain")]
     ClientCertChainError,
-    #[fail(display = "Error with Context")]
-    ContextError,
-    #[fail(display = "Error setting callback")]
-    CallbackError,
 }
 use self::ConnectionError::*;
 
@@ -88,26 +76,21 @@ impl<C> Connection<C> {
         }
     }
 
-    pub fn set_config(&mut self, config: &Config) -> ConnectionResult {
+    /// Associates a [`Config`](struct.Config.html) struct with a connection.
+    pub fn set_config(&mut self, config: &Config) {
         let ret = unsafe { s2n_connection_set_config(self.s2n_connection, config.s2n_config) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ConnectionSetConfigError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0, ret, "Unexpected response from s2n_connection_set_config")
     }
 
-    pub fn set_context(&mut self, mut ctx: C) -> ConnectionResult {
+    /// Set user defined context.
+    pub fn set_context(&mut self, mut ctx: C) {
         let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe { s2n_connection_set_ctx(self.s2n_connection, ctx_ptr) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ConnectionSetContextError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0, ret, "Unexpected response from s2n_connection_set_ctx")
     }
 
+    /// Get user defined context.
     pub fn get_context(&self) -> Option<&mut C> {
         let ctx_ptr = unsafe { s2n_connection_get_ctx(self.s2n_connection) };
         if ctx_ptr.is_null() {
@@ -118,6 +101,11 @@ impl<C> Connection<C> {
         }
     }
 
+    /// Sets the file-descriptor for an s2n connection.
+    /// This file-descriptor should be active and connected.
+    ///
+    /// s2n also supports setting the read and write file-descriptors to different values
+    /// (for pipes or other unusual types of I/O).
     pub fn set_fd(&mut self, readfd: RawFd) -> ConnectionResult {
         let ret = unsafe { s2n_connection_set_fd(self.s2n_connection, readfd) };
         match ret {
@@ -154,84 +142,133 @@ impl<C> Connection<C> {
         }
     }
 
-    pub fn set_recv_ctx<RC>(&mut self, mut ctx: RC) -> ConnectionResult {
+    /// s2n provides an I/O abstraction layer in the event the application would like to keep
+    /// control over I/O operations.
+    ///
+    /// This is defined using callbacks, which take as input a context containing
+    /// anything needed in the function (for example, a file descriptor), the buffer
+    /// holding data to be sent or received, and the length of the buffer.
+    ///
+    /// The io_context passed to the callbacks may be set using
+    /// [`set_recv_ctx`](struct.Connection.html#method.set_recv_ctx) and
+    /// [`set_send_ctx`](struct.Connection.html#method.set_send_ctx).
+    pub fn set_recv_ctx<RC>(&mut self, mut ctx: RC) {
         let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe { s2n_connection_set_recv_ctx(self.s2n_connection, ctx_ptr) };
 
         ::std::mem::forget(ctx);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ContextError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_set_recv_ctx")
     }
 
-    pub fn set_send_ctx<RC>(&mut self, mut ctx: RC) -> ConnectionResult {
+    pub fn set_send_ctx<RC>(&mut self, mut ctx: RC) {
         let ctx_ptr = &mut ctx as *mut _ as *mut ::std::os::raw::c_void;
 
         let ret = unsafe { s2n_connection_set_send_ctx(self.s2n_connection, ctx_ptr) };
 
         ::std::mem::forget(ctx);
 
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ContextError),
-            _ => unreachable!(),
-        }
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_set_send_ctx")
     }
 
-    pub fn set_recv_cb(&mut self, callback: RecvFn) -> ConnectionResult {
+    /// s2n provides an I/O abstraction layer in the event the application would like to keep
+    /// control over I/O operations.
+    ///
+    /// [`set_recv_cb`](struct.Connection.html#method.set_recv_cb) and
+    /// [`set_send_cb`](struct.Connection.html#method.set_send_cb) may
+    /// be used to send or receive data with callbacks defined by the user.
+    /// These may be blocking or nonblocking.
+    ///
+    /// These callbacks take as input a context containing anything needed in the function (for
+    /// example, a file descriptor), the buffer holding data to be sent or received, and the length
+    /// of the buffer.
+    /// The io_context passed to the callbacks may be set separately using
+    /// [`set_recv_ctx`](struct.Connection.html#method.set_recv_ctx) and
+    /// [`set_send_ctx`](struct.Connection.html#method.set_send_ctx).
+    pub fn set_recv_cb(&mut self, callback: RecvFn) {
         let ret = unsafe { s2n_connection_set_recv_cb(self.s2n_connection, callback) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_set_recv_cb")
     }
 
-    pub fn set_send_cb(&mut self, callback: SendFn) -> ConnectionResult {
+    pub fn set_send_cb(&mut self, callback: SendFn) {
         let ret = unsafe { s2n_connection_set_send_cb(self.s2n_connection, callback) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(CallbackError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_set_send_cb")
     }
 
-    pub fn prefer_throughput(&mut self) -> ConnectionResult {
+    /// [`prefer_throughput`](struct.Connection.html#method.prefer_throughput) and
+    /// [`prefer_low_latency`](struct.Connection.html#method.prefer_low_latency) change the behavior
+    /// of s2n when sending data to prefer either throughput or low latency.
+    ///
+    /// Connections prefering low latency will be encrypted using small record sizes that can be
+    /// decrypted sooner by the recipient.
+    ///
+    /// Connections prefering throughput will use large record sizes that minimize overhead.
+    ///
+    /// # Note
+    ///
+    /// Connections default to an 8k outgoing maximum
+    pub fn prefer_throughput(&mut self) {
         let ret = unsafe { s2n_connection_prefer_throughput(self.s2n_connection) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(SetLatencyThroughputError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_prefer_throughput")
     }
 
-    pub fn prefer_low_latency(&mut self) -> ConnectionResult {
+    /// [`prefer_throughput`](struct.Connection.html#method.prefer_throughput) and
+    /// [`prefer_low_latency`](struct.Connection.html#method.prefer_low_latency) change the behavior
+    /// of s2n when sending data to prefer either throughput or low latency.
+    ///
+    /// Connections prefering low latency will be encrypted using small record sizes that can be
+    /// decrypted sooner by the recipient.
+    ///
+    /// Connections prefering throughput will use large record sizes that minimize overhead.
+    ///
+    /// # Note
+    ///
+    /// Connections default to an 8k outgoing maximum
+    pub fn prefer_low_latency(&mut self) {
         let ret = unsafe { s2n_connection_prefer_low_latency(self.s2n_connection) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(SetLatencyThroughputError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_prefer_low_latency")
     }
 
-    pub fn set_blinding(&mut self, blinding: Blinding) -> ConnectionResult {
+    /// `set_blinding` can be used to configure s2n to either use built-in blinding
+    /// (set blinding to [`S2N_BUILT_IN_BLINDING`](enum.Blinding.html#variant.S2N_BUILT_IN_BLINDING))
+    /// or self-service blinding (set blinding to
+    /// [`S2N_SELF_SERVICE_BLINDING`](enum.Blinding.html#variant.S2N_SELF_SERVICE_BLINDING)).
+    pub fn set_blinding(&mut self, blinding: Blinding) {
         let ret = unsafe { s2n_connection_set_blinding(self.s2n_connection, blinding) };
-        match ret {
-            0 => Ok(()),
-            -1 => Err(ConnectionSetBlindingError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_set_blinding")
     }
 
+    /// Return the number of nanoseconds an application using self-service
+    /// blinding should pause before closing/shutting down the connection.
     pub fn get_delay(&mut self) -> u64 {
         // TODO: Should be &mut self? It calls nanoseconds_since_epoch
         unsafe { s2n_connection_get_delay(self.s2n_connection) }
     }
 
+    /// Set the server name for the connection.
+    ///
+    /// In future, this can be used by clients who wish to use the TLS "Server Name indicator" extension.
+    /// At present, client functionality is disabled.
     pub fn set_server_name(&mut self, server_name: &str) -> ConnectionResult {
         // These must be on seperate lines to ensure the lifetime of the string is longer than the FFI call
         let server_name_c = CString::new(server_name).map_err(FFIError)?;
@@ -245,6 +282,8 @@ impl<C> Connection<C> {
         }
     }
 
+    /// Return the server name associated with a connection, or `None` if none is found.
+    /// This can be used by a server to determine which server name the client is using.
     pub fn get_server_name(&self) -> Option<String> {
         let ret = unsafe { s2n_get_server_name(self.s2n_connection) };
         if ret.is_null() {
@@ -256,6 +295,8 @@ impl<C> Connection<C> {
             .map(|s| s.to_string())
     }
 
+    /// Return the negotiated application protocol for a connection.
+    /// In the event of no protocol being negotiated, `None` is returned.
     pub fn get_application_protocol(&self) -> Option<String> {
         let ret = unsafe { s2n_get_application_protocol(self.s2n_connection) };
         if ret.is_null() {
@@ -267,6 +308,8 @@ impl<C> Connection<C> {
             .map(|s| s.to_string())
     }
 
+    /// Return the OCSP response sent by a server during the handshake.
+    /// If no status response is received, `None` is returned.
     pub fn get_ocsp_response(&self) -> Option<&[u8]> {
         let mut length: u32 = 0;
 
@@ -314,6 +357,16 @@ impl<C> Connection<C> {
         }
     }
 
+    /// Wipe an existing connection and allows it to be reused.
+    ///
+    /// It erases all data associated with a connection including pending reads.
+    /// This function should be called after all I/O is completed and
+    /// [`shutdown`](struct.Connection.html#method.shutdown) has been called.
+    ///
+    /// Reusing the same connection handle(s) is more performant than repeatedly
+    /// constructing new [`Connection`](struct.Connection.html) structs.
+    ///
+    /// The `Drop` impl performs its own wipe of sensitive data.
     pub fn wipe(&mut self) -> ConnectionResult {
         let ret = unsafe { s2n_connection_wipe(self.s2n_connection) };
         match ret {
@@ -323,6 +376,16 @@ impl<C> Connection<C> {
         }
     }
 
+    /// Free the memory associated with an connection handle.
+    /// The handle is considered invalid after [`free`](struct.Connection.html#method.free) is used.
+    ///
+    /// [`wipe`](struct.Connection.html#method.wipe) does not need to be called prior to this function.
+    /// [`free`](struct.Connection.html#method.free) performs its own wipe of sensitive data.
+    ///
+    /// # Safety
+    ///
+    /// This function will cause a double free if called twice.
+    /// Users should generally not call this, and depend on the `Drop` implementation.
     pub unsafe fn free(&mut self) -> ConnectionResult {
         let ret = s2n_connection_free(self.s2n_connection);
         match ret {
@@ -332,6 +395,19 @@ impl<C> Connection<C> {
         }
     }
 
+    /// Attempt a closure at the TLS layer.
+    /// It does not close the underlying transport.
+    /// The call may block in either direction.
+    ///
+    /// Unlike other TLS implementations, this attempts a graceful shutdown by default.
+    /// It will not return with success unless a *close_notify* alert is successfully sent and received.
+    /// As a result, `shutdown` may fail when interacting with a non-conformant TLS implementation.
+    ///
+    /// Once `shutdown` is complete:
+    ///
+    /// * The `Connection` handle cannot be used for reading for writing.
+    /// * The underlying transport can be closed.
+    /// * The `Connection` handle can be freed via [`free`](struct.Connection.html#method.free) or reused via [`wipe`](struct.Connection.html#method.wipe)
     pub fn shutdown(&self) -> ConnectionResult {
         let mut blocked: BlockedStatus = BlockedStatus::S2N_NOT_BLOCKED;
 
@@ -343,18 +419,24 @@ impl<C> Connection<C> {
         }
     }
 
-    pub fn get_client_auth_type(&self) -> Result<CertAuthType, ConnectionError> {
+    pub fn get_client_auth_type(&self) -> CertAuthType {
         let mut client_auth_type: CertAuthType = CertAuthType::S2N_CERT_AUTH_NONE;
         let ret = unsafe {
             s2n_connection_get_client_auth_type(self.s2n_connection, &mut client_auth_type)
         };
-        match ret {
-            0 => Ok(client_auth_type),
-            -1 => Err(CertAuthTypeError),
-            _ => unreachable!(),
-        }
+
+        assert_eq!(0,
+                   ret,
+                   "Unexpected response from s2n_connection_get_client_auth_type");
+
+        client_auth_type
     }
 
+    /// Sets whether or not a Client Certificate should be required to complete the TLS Connection.
+    ///
+    /// If this is set to [`S2N_CERT_AUTH_REQUIRED`](enum.CertAuthType.html#variant.S2N_CERT_AUTH_REQUIRED)
+    /// then a verify_cert_trust_chain_fn callback should be provided as well since the current
+    /// default is for s2n to accept all RSA Certs on the client side, and deny all certs on the server side.
     pub fn set_client_auth_type(&mut self, client_auth_type: CertAuthType) -> ConnectionResult {
         let ret =
             unsafe { s2n_connection_set_client_auth_type(self.s2n_connection, client_auth_type) };
@@ -365,6 +447,7 @@ impl<C> Connection<C> {
         }
     }
 
+    // TODO: I think we need slice::from_raw_parts to convert back here
     pub fn get_client_cert_chain(&self) -> Result<&[u8], ConnectionError> {
         let der_cert_chain_out: &[u8] = &[];
         let mut cert_chain_len: u32 = 0;
@@ -384,29 +467,39 @@ impl<C> Connection<C> {
         }
     }
 
+    /// [`get_wire_bytes_in`](struct.Connection.html#method.get_wire_bytes_in) and
+    /// [`get_wire_bytes_out`](struct.Connection.html#method.get_wire_bytes_out) return
+    /// the number of bytes transmitted by s2n "on the wire", in and out respectively.
     pub fn get_wire_bytes_in(&self) -> u64 {
         unsafe { s2n_connection_get_wire_bytes_in(self.s2n_connection) }
     }
 
+    /// [`get_wire_bytes_in`](struct.Connection.html#method.get_wire_bytes_in) and
+    /// [`get_wire_bytes_out`](struct.Connection.html#method.get_wire_bytes_out) return
+    /// the number of bytes transmitted by s2n "on the wire", in and out respectively.
     pub fn get_wire_bytes_out(&self) -> u64 {
         unsafe { s2n_connection_get_wire_bytes_out(self.s2n_connection) }
     }
 
+    /// Return the protocol version number supported by the client.
     pub fn get_client_protocol_version(&self) -> Result<ProtocolVersion, ConnectionError> {
         let ret = unsafe { s2n_connection_get_client_protocol_version(self.s2n_connection) };
         ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
     }
 
+    /// Return the protocol version number supported by the server.
     pub fn get_server_protocol_version(&self) -> Result<ProtocolVersion, ConnectionError> {
         let ret = unsafe { s2n_connection_get_server_protocol_version(self.s2n_connection) };
         ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
     }
 
+    /// Return the protocol version number actually used by s2n for the connection.
     pub fn get_actual_protocol_version(&self) -> Result<ProtocolVersion, ConnectionError> {
         let ret = unsafe { s2n_connection_get_actual_protocol_version(self.s2n_connection) };
         ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
     }
 
+    /// Return the protocol version used in the initial client hello message.
     pub fn get_client_hello_version(&self) -> Result<ProtocolVersion, ConnectionError> {
         let ret = unsafe { s2n_connection_get_client_hello_version(self.s2n_connection) };
         ProtocolVersion::from_int(ret as ::std::os::raw::c_uint).ok_or(ProtocolVersionError)
@@ -420,6 +513,8 @@ impl<C> Connection<C> {
         }
     }
 
+    /// Return a string indicating the cipher suite negotiated by s2n for a connection
+    /// in Openssl format, e.g. "ECDHE-RSA-AES128-GCM-SHA256".
     pub fn get_cipher(&self) -> Option<String> {
         let ret = unsafe { s2n_connection_get_cipher(self.s2n_connection) };
         if ret.is_null() {
@@ -431,6 +526,8 @@ impl<C> Connection<C> {
             .map(|s| s.to_string())
     }
 
+    /// Return a string indicating the elliptic curve used during ECDHE key exchange.
+    /// `None` is returned if no curve was used.
     pub fn get_curve(&self) -> Result<Option<String>, ConnectionError> {
         let ret = unsafe { s2n_connection_get_curve(self.s2n_connection) };
         if ret.is_null() {
@@ -447,6 +544,10 @@ impl<C> Connection<C> {
         }
     }
 
+    /// If a connection was shut down by the peer, return the TLS alert code that
+    /// caused a connection to be shut down.
+    ///
+    /// s2n considers all TLS alerts fatal and shuts down a connection whenever one is received.
     pub fn get_alert(&mut self) -> Option<::std::os::raw::c_int> {
         let ret = unsafe { s2n_connection_get_alert(self.s2n_connection) };
         match ret {
@@ -587,14 +688,14 @@ mod tests {
     fn test_connection_set_config() {
         let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
         let config = Config::new();
-        connection.set_config(&config).unwrap();
+        connection.set_config(&config);
     }
 
     #[test]
     fn test_connection_set_context() {
         let mut connection = Connection::new(Mode::S2N_SERVER);
         let context = "some data";
-        connection.set_context(context).unwrap();
+        connection.set_context(context);
     }
 
     #[test]
@@ -671,7 +772,7 @@ mod tests {
             .set_client_auth_type(CertAuthType::S2N_CERT_AUTH_REQUIRED)
             .unwrap();
         assert_eq!(CertAuthType::S2N_CERT_AUTH_REQUIRED,
-                   connection.get_client_auth_type().unwrap())
+                   connection.get_client_auth_type())
     }
 
     #[test]
@@ -707,21 +808,19 @@ mod tests {
     #[test]
     fn test_connection_set_blinding() {
         let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
-        connection
-            .set_blinding(Blinding::S2N_SELF_SERVICE_BLINDING)
-            .unwrap()
+        connection.set_blinding(Blinding::S2N_SELF_SERVICE_BLINDING)
     }
 
     #[test]
     fn test_connection_prefer_low_latency() {
         let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
-        connection.prefer_low_latency().unwrap()
+        connection.prefer_low_latency()
     }
 
     #[test]
     fn test_connection_prefer_throughput() {
         let mut connection: Connection = Connection::new(Mode::S2N_SERVER);
-        connection.prefer_throughput().unwrap()
+        connection.prefer_throughput()
     }
 
     #[test]
@@ -741,7 +840,7 @@ mod tests {
 
         let ctx = ();
 
-        connection.set_recv_ctx(ctx).unwrap()
+        connection.set_recv_ctx(ctx)
     }
 
     #[test]
@@ -750,7 +849,7 @@ mod tests {
 
         let ctx = ();
 
-        connection.set_send_ctx(ctx).unwrap()
+        connection.set_send_ctx(ctx)
     }
 
     #[test]
@@ -764,7 +863,7 @@ mod tests {
             unimplemented!()
         }
 
-        connection.set_recv_cb(Some(test)).unwrap()
+        connection.set_recv_cb(Some(test))
     }
 
     #[test]
@@ -778,7 +877,7 @@ mod tests {
             unimplemented!()
         }
 
-        connection.set_send_cb(Some(test)).unwrap()
+        connection.set_send_cb(Some(test))
     }
 
     #[test]
@@ -819,7 +918,7 @@ mod tests {
 
         let context = Example::One;
 
-        connection.set_context(context).unwrap();
+        connection.set_context(context);
         assert_eq!(&context, connection.get_context().unwrap());
     }
 
@@ -832,7 +931,7 @@ mod tests {
         let context = "Hello";
         ::std::mem::forget(context);
 
-        connection.set_context(context).unwrap();
+        connection.set_context(context);
         assert_eq!(&context, connection.get_context().unwrap());
     }
 }
